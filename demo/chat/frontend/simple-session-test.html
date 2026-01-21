@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>会话管理测试</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        #test-results {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f5f5f5;
+            border-radius: 4px;
+        }
+        .success { color: green; }
+        .error { color: red; }
+        .info { color: blue; }
+    </style>
+</head>
+<body>
+    <h1>会话管理测试</h1>
+    <p>使用以下按钮测试会话管理功能：</p>
+    
+    <button onclick="clearTestData()">1. 清理测试数据</button>
+    <button onclick="createNewSession()">2. 创建新会话</button>
+    <button onclick="checkSession()">3. 检查会话状态</button>
+    <button onclick="refreshPage()">4. 刷新页面并验证</button>
+    
+    <div id="test-results"></div>
+
+    <script>
+        // 测试结果显示函数
+        function showResult(message, type) {
+            const resultsDiv = document.getElementById('test-results');
+            const div = document.createElement('div');
+            div.className = type;
+            div.textContent = new Date().toLocaleTimeString() + ': ' + message;
+            resultsDiv.appendChild(div);
+            resultsDiv.scrollTop = resultsDiv.scrollHeight;
+        }
+
+        // 清理测试数据
+        function clearTestData() {
+            try {
+                localStorage.removeItem('sessions');
+                localStorage.removeItem('sessionId');
+                // 清理会话消息
+                Object.keys(localStorage).forEach(key => {
+                    if (key.startsWith('chat_messages_v1_')) {
+                        localStorage.removeItem(key);
+                    }
+                });
+                showResult('测试数据已清理', 'success');
+                showCurrentState();
+            } catch (e) {
+                showResult('清理测试数据失败: ' + e.message, 'error');
+            }
+        }
+
+        // 显示当前状态
+        function showCurrentState() {
+            const sessionId = localStorage.getItem('sessionId');
+            const sessionsJson = localStorage.getItem('sessions');
+            let sessions = {};
+            if (sessionsJson) {
+                try {
+                    sessions = JSON.parse(sessionsJson);
+                } catch (e) {
+                    showResult('解析会话列表失败: ' + e.message, 'error');
+                }
+            }
+            showResult(`当前状态: sessionId=${sessionId}, 会话数量=${Object.keys(sessions).length}`, 'info');
+        }
+
+        // 创建新会话（模拟点击按钮）
+        function createNewSession() {
+            try {
+                // 生成新会话ID
+                const newSessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                
+                // 保存到localStorage
+                localStorage.setItem('sessionId', newSessionId);
+                
+                // 更新会话列表
+                const sessionsJson = localStorage.getItem('sessions');
+                let sessions = sessionsJson ? JSON.parse(sessionsJson) : {};
+                sessions[newSessionId] = { 
+                    id: newSessionId, 
+                    name: "new session", 
+                    timestamp: Date.now() 
+                };
+                
+                localStorage.setItem('sessions', JSON.stringify(sessions));
+                
+                showResult('新会话已创建: ' + newSessionId, 'success');
+                showCurrentState();
+                
+                // 验证保存是否成功
+                const savedSessionsJson = localStorage.getItem('sessions');
+                if (savedSessionsJson) {
+                    const savedSessions = JSON.parse(savedSessionsJson);
+                    if (savedSessions[newSessionId]) {
+                        showResult('会话保存验证成功', 'success');
+                    } else {
+                        showResult('会话保存验证失败: 会话不在保存的列表中', 'error');
+                    }
+                } else {
+                    showResult('会话保存验证失败: 无法获取保存的会话列表', 'error');
+                }
+                
+            } catch (e) {
+                showResult('创建新会话失败: ' + e.message, 'error');
+            }
+        }
+
+        // 检查会话状态
+        function checkSession() {
+            try {
+                const sessionId = localStorage.getItem('sessionId');
+                const sessionsJson = localStorage.getItem('sessions');
+                
+                if (!sessionId) {
+                    showResult('没有找到sessionId', 'error');
+                    return;
+                }
+                
+                if (!sessionsJson) {
+                    showResult('没有找到会话列表', 'error');
+                    return;
+                }
+                
+                const sessions = JSON.parse(sessionsJson);
+                if (sessions[sessionId]) {
+                    showResult('会话状态正常: ' + sessionId, 'success');
+                    showResult('会话信息: ' + JSON.stringify(sessions[sessionId]), 'info');
+                } else {
+                    showResult('会话状态异常: sessionId不在会话列表中', 'error');
+                }
+                
+                showCurrentState();
+                
+            } catch (e) {
+                showResult('检查会话状态失败: ' + e.message, 'error');
+            }
+        }
+
+        // 刷新页面并验证
+        function refreshPage() {
+            // 保存当前会话ID用于刷新后验证
+            const currentSessionId = localStorage.getItem('sessionId');
+            if (currentSessionId) {
+                sessionStorage.setItem('test_session_id', currentSessionId);
+                showResult('准备刷新页面，将验证会话: ' + currentSessionId, 'info');
+            } else {
+                showResult('没有找到sessionId，无法验证', 'error');
+                return;
+            }
+            
+            // 刷新页面
+            window.location.reload();
+        }
+
+        // 页面加载完成后执行的代码
+        window.addEventListener('load', function() {
+            showResult('页面加载完成', 'info');
+            
+            // 检查是否是刷新后验证
+            const testSessionId = sessionStorage.getItem('test_session_id');
+            if (testSessionId) {
+                sessionStorage.removeItem('test_session_id');
+                showResult('开始验证刷新后的会话: ' + testSessionId, 'info');
+                
+                // 等待1秒让页面完全加载
+                setTimeout(function() {
+                    const currentSessionId = localStorage.getItem('sessionId');
+                    const sessionsJson = localStorage.getItem('sessions');
+                    
+                    if (currentSessionId === testSessionId) {
+                        showResult('✅ 会话ID在刷新后保持一致', 'success');
+                    } else {
+                        showResult('❌ 会话ID在刷新后不一致: ' + currentSessionId + ' vs ' + testSessionId, 'error');
+                    }
+                    
+                    if (sessionsJson) {
+                        try {
+                            const sessions = JSON.parse(sessionsJson);
+                            if (sessions[testSessionId]) {
+                                showResult('✅ 会话在会话列表中', 'success');
+                                showResult('✅ 会话管理功能正常', 'success');
+                            } else {
+                                showResult('❌ 会话不在会话列表中', 'error');
+                            }
+                        } catch (e) {
+                            showResult('❌ 解析会话列表失败: ' + e.message, 'error');
+                        }
+                    } else {
+                        showResult('❌ 会话列表不存在', 'error');
+                    }
+                }, 1000);
+            }
+            
+            showCurrentState();
+        });
+    </script>
+</body>
+</html>

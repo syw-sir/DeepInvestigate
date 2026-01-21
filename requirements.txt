@@ -1,0 +1,9 @@
+# Core dependencies
+fastapi>=0.100.0
+uvicorn>=0.23.0
+openai>=1.0.0
+pydantic>=2.0.0
+pyyaml>=6.0
+
+# Optional dependencies (only used in specific functions)
+pandas>=2.0.0  # For data analysis functions

@@ -1,0 +1,16 @@
+{
+  "system": "Windows",
+  "node": "LAPTOP-B6IS5CUT",
+  "release": "11",
+  "version": "10.0.26100",
+  "machine": "AMD64",
+  "uptime": "\u9700\u8981\u7279\u5b9a\u547d\u4ee4",
+  "current_user": "runzi",
+  "is_root": false,
+  "python_version": "3.13.9"
+}
+
+Services:
+{
+  "note": "Windows\u670d\u52a1\u68c0\u67e5\u9700\u8981\u7ba1\u7406\u5458\u6743\u9650"
+}

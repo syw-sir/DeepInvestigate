@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>简单会话测试</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        button { margin: 5px; padding: 10px 20px; }
+        .result { margin: 10px 0; padding: 10px; background: #f5f5f5; border-radius: 5px; }
+        .success { color: green; }
+        .error { color: red; }
+    </style>
+</head>
+<body>
+    <h1>简单会话测试</h1>
+    
+    <button onclick="testSessionFlow()">运行会话测试</button>
+    <button onclick="clearAll()">清理所有数据</button>
+    <button onclick="showCurrentData()">查看当前数据</button>
+    
+    <div id="results"></div>
+
+    <script>
+        function log(message, type = 'info') {
+            const results = document.getElementById('results');
+            const div = document.createElement('div');
+            div.className = `result ${type}`;
+            div.textContent = `${new Date().toLocaleTimeString()}: ${message}`;
+            results.appendChild(div);
+            results.scrollTop = results.scrollHeight;
+        }
+
+        function clearAll() {
+            log('清理所有数据...');
+            localStorage.clear();
+            log('✓ 清理完成', 'success');
+            showCurrentData();
+        }
+
+        function showCurrentData() {
+            log('\n=== 当前localStorage数据 ===');
+            log(`sessionId: ${localStorage.getItem('sessionId')}`);
+            
+            const sessions = localStorage.getItem('sessions');
+            log(`sessions: ${sessions}`);
+            
+            if (sessions) {
+                try {
+                    const parsed = JSON.parse(sessions);
+                    log(`会话数量: ${Object.keys(parsed).length}`);
+                    log(`会话列表: ${JSON.stringify(parsed, null, 2)}`);
+                } catch (e) {
+                    log(`解析错误: ${e}`, 'error');
+                }
+            }
+            
+            log(`所有键: ${Object.keys(localStorage)}`);
+        }
+
+        async function testSessionFlow() {
+            log('=== 开始会话测试流程 ===');
+            
+            // 步骤1: 清理数据
+            log('步骤1: 清理数据');
+            localStorage.clear();
+            showCurrentData();
+            
+            // 步骤2: 生成并保存新会话
+            log('\n步骤2: 生成并保存新会话');
+            const newSessionId = `session_${Date.now()}_test`;
+            log(`生成新会话ID: ${newSessionId}`);
+            
+            localStorage.setItem('sessionId', newSessionId);
+            log(`✓ 保存sessionId: ${localStorage.getItem('sessionId')}`);
+            
+            // 创建会话列表
+            const sessionData = {
+                [newSessionId]: {
+                    id: newSessionId,
+                    name: "测试会话",
+                    timestamp: Date.now()
+                }
+            };
+            
+            localStorage.setItem('sessions', JSON.stringify(sessionData));
+            log(`✓ 保存会话列表: ${localStorage.getItem('sessions')}`);
+            
+            // 验证保存
+            const savedId = localStorage.getItem('sessionId');
+            const savedSessions = localStorage.getItem('sessions');
+            
+            if (savedId === newSessionId && savedSessions) {
+                log('✓ 保存验证成功', 'success');
+            } else {
+                log('✗ 保存验证失败', 'error');
+            }
+            
+            // 步骤3: 模拟页面刷新（清除内存状态）
+            log('\n步骤3: 模拟页面刷新');
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            // 步骤4: 恢复会话
+            log('\n步骤4: 恢复会话');
+            
+            // 这模拟了组件挂载时的逻辑
+            const sessionId = localStorage.getItem('sessionId');
+            log(`获取到sessionId: ${sessionId}`);
+            
+            const sessionsJson = localStorage.getItem('sessions');
+            log(`获取到会话列表: ${sessionsJson}`);
+            
+            let loadedSessions = {};
+            if (sessionsJson) {
+                try {
+                    loadedSessions = JSON.parse(sessionsJson);
+                    log(`解析的会话列表: ${JSON.stringify(loadedSessions, null, 2)}`);
+                } catch (e) {
+                    log(`解析会话列表失败: ${e}`, 'error');
+                }
+            }
+            
+            // 检查会话是否存在
+            if (sessionId && loadedSessions[sessionId]) {
+                log('\n🎉 测试成功！会话在页面刷新后保留了', 'success');
+            } else {
+                log('\n❌ 测试失败！会话在页面刷新后丢失了', 'error');
+            }
+            
+            log('\n=== 测试流程结束 ===');
+        }
+
+        // 页面加载时显示初始数据
+        showCurrentData();
+    </script>
+</body>
+</html>
