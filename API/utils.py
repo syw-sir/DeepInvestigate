@@ -788,7 +788,8 @@ def render_file_block(
     
     # 构建 <File> 标签块
     if file_items:
-        return f"\n<File>\n{'\n'.join(file_items)}\n</File>\n"
+        joined = '\n'.join(file_items)
+        return f"\n<File>\n{joined}\n</File>\n"
     
     return ""
 

@@ -13,7 +13,11 @@ wheels/
 
 # Virtual environment
 .venv/
-
+deep_venv/
+__pycache__/
+*.pyc
+.env
+*.log
 # IDE
 .idea/
 .cursor/

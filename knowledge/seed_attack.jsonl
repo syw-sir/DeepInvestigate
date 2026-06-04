@@ -1,0 +1,10 @@
+{"id": "T1110", "title": "Brute Force - 暴力破解", "source": "mitre_attack", "tactic": "credential-access", "content": "攻击者通过反复尝试用户名/密码组合获取账户访问权限。常见形式：密码喷洒、字典攻击、凭据填充。日志特征：短时间内大量 Failed login / Failed password 事件，集中于少数账户或来自少数 IP。检测方法：统计单位时间内同一 IP 或同一账户的失败登录次数，超阈值告警。缓解：强密码策略、账户锁定、MFA、限制管理端口暴露。"}
+{"id": "T1110.001", "title": "Password Guessing - 密码猜测", "source": "mitre_attack", "tactic": "credential-access", "content": "针对单一账户连续尝试常见密码或字典词。日志：SSH/RDP/SMB/Web 登录失败聚集。响应：封禁来源 IP、强制密码重置、启用 fail2ban 类工具。"}
+{"id": "T1110.003", "title": "Password Spraying - 密码喷洒", "source": "mitre_attack", "tactic": "credential-access", "content": "对大量账户使用单一弱口令尝试，规避账户锁定。日志特征：同一 IP 在短时间内尝试大量不同账户。检测：聚合多账户失败登录的相同源 IP。"}
+{"id": "T1078", "title": "Valid Accounts - 合法凭据滥用", "source": "mitre_attack", "tactic": "initial-access", "content": "攻击者使用合法账户凭据访问系统，绕过传统检测。检测要点：异常时间段登录、来自异常地理位置、与历史行为画像偏离。"}
+{"id": "T1021", "title": "Remote Services - 远程服务横向移动", "source": "mitre_attack", "tactic": "lateral-movement", "content": "通过 SSH、RDP、SMB、WinRM、VNC 等远程服务在网络内横向移动。关键检测点：内网主机之间异常的远程登录会话、非工作时段管理协议使用、跨域账户横向使用。"}
+{"id": "T1059", "title": "Command and Scripting Interpreter - 命令执行", "source": "mitre_attack", "tactic": "execution", "content": "攻击者通过 bash/cmd/powershell/python 等解释器执行恶意命令。检测：可疑命令行参数（base64、长字符串、IEX 下载）、异常父子进程关系（web 服务进程派生 shell）。"}
+{"id": "T1078.003", "title": "Local Accounts", "source": "mitre_attack", "tactic": "persistence", "content": "本地账户被滥用维持持久化。重点：新增本地管理员、隐藏账户（如以 $ 结尾）、低使用率账户突然活跃。"}
+{"id": "T1486", "title": "Data Encrypted for Impact - 勒索加密", "source": "mitre_attack", "tactic": "impact", "content": "攻击者批量加密文件以勒索。检测：短时间内大量文件被重写、文件后缀异常变更、卷影副本被删除（vssadmin delete shadows）、安全日志异常。"}
+{"id": "T1071", "title": "Application Layer Protocol - C2 通信", "source": "mitre_attack", "tactic": "command-and-control", "content": "使用 HTTP/HTTPS/DNS 等常见协议进行 C2 通信。检测：到陌生域名的周期性请求、DNS TXT 查询异常增多、长连接 + 小流量、Beacon 抖动。"}
+{"id": "T1003", "title": "OS Credential Dumping - 凭据导出", "source": "mitre_attack", "tactic": "credential-access", "content": "从 LSASS/SAM/NTDS.dit 等位置导出凭据。检测：mimikatz 关键字、procdump lsass.exe、对 ntds.dit 的访问、可疑 secretsdump 行为。"}

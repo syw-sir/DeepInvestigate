@@ -8,7 +8,132 @@ api:
   # 模型路径
   model_path: "deepseek-chat"
   # DeepSeek API Key
-  api_key: "sk-XXX"
+  api_key: "sk-5d5a490fa3c1476f922aa07472bc6177"
+
+# ============================================================
+# DeepInvestigate v2.0 新增配置
+# ============================================================
+
+# Redis Stack 配置（长期记忆）
+redis:
+  host: "localhost"
+  port: 6379
+  db: 0
+  password: ""
+  # 工作记忆 TTL（秒）
+  working_memory_ttl: 1800
+  # 情景记忆向量索引名
+  episodic_index: "em_idx"
+
+# ChromaDB 配置（RAG 知识库）
+chroma:
+  host: "localhost"
+  port: 8000
+  collection: "knowledge_base"
+  # 检索默认 top_k
+  default_top_k: 5
+
+# Embedding 模型配置
+embedder:
+  # provider 可选: huggingface / openai
+  provider: "openai"
+  # huggingface: BAAI/bge-m3 等；openai: text-embedding-3-small / text-embedding-3-large
+  model: "text-embedding-3-small"
+  device: "cpu"
+  dim: 1536                       # openai small=1536 / large=3072 / bge-m3=1024
+  batch_size: 32
+  # 仅 openai provider 使用（独立于 LLM 的 api_base/api_key）
+  api_base: "https://jeniya.top/v1"
+  api_key: "sk-dB2j9ev4JlTBOQkZhfvUpfcXaMokhXuEsyI1HmeM9YFsf3TH"
+
+# LangSmith 可观测性配置
+langsmith:
+  enabled: false              # 上线后改为 true
+  project: "DeepInvestigate-Dev"
+  api_key: ""                 # 从 https://smith.langchain.com 获取
+  endpoint: "https://api.smith.langchain.com"
+
+# ============================================================
+# DeepInvestigate v3.0 新增配置
+# ============================================================
+
+# 多模型路由配置
+models:
+  tiers:
+    high:
+      primary: "deepseek-chat"
+      fallback: ""
+    medium:
+      primary: "deepseek-chat"
+      fallback: ""
+    low:
+      primary: "deepseek-chat"
+      fallback: ""
+  providers:
+    deepseek:
+      api_key: "sk-5d5a490fa3c1476f922aa07472bc6177"
+      base_url: "https://api.deepseek.com/v1"
+      models:
+        - "deepseek-chat"
+    openai:
+      api_key: ""
+      base_url: "https://api.openai.com/v1"
+      models:
+        - "gpt-4o-mini"
+
+# MCP 配置
+mcp:
+  enabled: false
+  servers:
+    - name: "local-tools"
+      transport: "stdio"
+      command: "python"
+      args: ["-m", "API.mcp.server"]
+
+# HITL 配置
+hitl:
+  enabled: true
+  risk_levels:
+    "0": ["rag_search", "recall_memory", "list_files", "read_file"]
+    "1": ["run_python", "write_file", "web_search"]
+    "2": ["query_logs", "search_cve"]
+
+# Guardrails 配置
+guardrails:
+  input:
+    enabled: true
+    blocked_patterns: []
+  output:
+    pii_masking: true
+    safety_scan: true
+
+# Checkpointing 配置
+checkpoint:
+  db_path: "data/checkpoints.db"
+  ttl_days: 7
+
+# Agent 编排配置
+agent:
+  max_iterations: 15          # 单次任务最大轮数
+  recursion_limit: 25         # LangGraph 递归上限
+  default_temperature: 0.4
+  planner_temperature: 0.3
+  investigator_temperature: 0.4
+  reporter_temperature: 0.5
+  # 是否启用各能力（便于灰度）
+  enable_memory: true
+  enable_rag: true
+  enable_multi_agent: true
+
+# 工具配置
+tools:
+  code_executor:
+    timeout: 120              # 秒
+    memory_limit_mb: 512      # 内存上限
+    network_disabled: true    # 默认禁网
+  web_search:
+    enabled: false
+    api_key: ""
 
 # 系统提示词配置
 prompts:
