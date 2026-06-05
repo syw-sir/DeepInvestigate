@@ -24,6 +24,16 @@ from .log_query import query_logs
 from .cve_search import search_cve
 from .web_search import web_search
 
+# v4.0 取证工具
+from .forensics.process_scanner import scan_processes
+from .forensics.network_monitor import check_network
+from .forensics.system_info import collect_system_info
+from .forensics.defender_checker import check_defender_logs
+from .forensics.login_auditor import audit_logins
+from .forensics.startup_checker import check_startup
+from .forensics.registry_scanner import scan_registry
+from .forensics.file_integrity import check_file_integrity
+
 
 # ----- 全量工具清单（顺序即是给 LLM 看到的顺序） -----
 _ALL_TOOLS: List[BaseTool] = [
@@ -36,6 +46,15 @@ _ALL_TOOLS: List[BaseTool] = [
     rag_search,
     recall_memory,
     web_search,
+    # v4.0 取证工具
+    scan_processes,
+    check_network,
+    collect_system_info,
+    check_defender_logs,
+    audit_logins,
+    check_startup,
+    scan_registry,
+    check_file_integrity,
 ]
 
 

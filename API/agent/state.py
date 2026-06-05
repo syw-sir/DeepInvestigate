@@ -67,6 +67,14 @@ class AgentState(TypedDict, total=False):
     a2a_messages: List[dict]
     parallel_tasks: Optional[list]
 
+    # ---- v4.0: 自主取证 ----
+    forensic_phase: str                              # 取证阶段: "initial" / "deep" / "complete"
+    collected_evidence: List[Dict[str, Any]]          # 已采集的原始证据（最多20条）
+    evidence_summary: Optional[str]                   # 证据摘要
+    threat_indicators: List[Dict[str, Any]]           # 威胁指标 [{type, value, confidence, mitre_id}]
+    mitre_mappings: List[Dict[str, Any]]              # MITRE ATT&CK 技战术映射
+    risk_score: Optional[float]                       # 主机风险评分 (0-100)
+
 
 def new_initial_state(
     *,
@@ -105,4 +113,11 @@ def new_initial_state(
         guardrail_triggered=False,
         a2a_messages=[],
         parallel_tasks=None,
+        # v4.0
+        forensic_phase="initial",
+        collected_evidence=[],
+        evidence_summary=None,
+        threat_indicators=[],
+        mitre_mappings=[],
+        risk_score=None,
     )

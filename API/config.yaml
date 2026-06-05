@@ -201,3 +201,67 @@ prompts:
       5. **结论与建议**：提供最终结论和后续建议
 
       报告应结构清晰，逻辑连贯，语言专业但易于理解。请确保报告内容全面覆盖对话中的所有重要信息，并保持客观中立的语气。
+
+# ============================================================
+# DeepInvestigate v4.0 自主取证配置
+# ============================================================
+
+forensics:
+  enabled: true
+
+  # 命令白名单（主机端执行的命令，不在白名单中的拒绝执行）
+  command_whitelist:
+    - "wmic"
+    - "netstat"
+    - "wevtutil"
+    - "schtasks"
+    - "powershell"
+    - "sc"
+    - "reg"
+    - "icacls"
+
+  # 扫描限制
+  limits:
+    max_processes: 500
+    max_network_conns: 1000
+    max_log_events: 500
+    file_scan_max_depth: 3
+    file_scan_timeout: 120
+
+  # 风险评分权重
+  risk_scoring:
+    # 基础分
+    suspicious_process: 15
+    suspicious_network: 15
+    failed_logins_spike: 20
+    unsigned_startup: 20
+    registry_anomaly: 15
+    file_anomaly: 15
+    defender_alert: 25
+    # 关联加权：同一实体同时触发多项指标 → 额外 ×1.5
+    correlation_multiplier: 1.5
+    threat_threshold: 40
+
+  # 可疑指标规则
+  indicators:
+    suspicious_paths:
+      - "%TEMP%"
+      - "%APPDATA%\\Local\\Temp"
+      - "C:\\Users\\Public"
+      - "C:\\ProgramData\\Temp"
+    suspicious_parents:
+      - "winword.exe"
+      - "excel.exe"
+      - "outlook.exe"
+      - "wscript.exe"
+      - "mshta.exe"
+    suspicious_cmd_keywords:
+      - "-enc"
+      - "-EncodedCommand"
+      - "IEX"
+      - "Invoke-Expression"
+      - "Invoke-WebRequest"
+      - "DownloadString"
+      - "FromBase64String"
+      - "Net.WebClient"
+      - "Start-Process -WindowStyle Hidden"
