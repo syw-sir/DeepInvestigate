@@ -115,7 +115,7 @@ checkpoint:
 # Agent 编排配置
 agent:
   max_iterations: 15          # 单次任务最大轮数
-  recursion_limit: 25         # LangGraph 递归上限
+  recursion_limit: 50         # LangGraph 递归上限（调查需多轮工具调用）
   default_temperature: 0.4
   planner_temperature: 0.3
   investigator_temperature: 0.4
@@ -265,3 +265,65 @@ forensics:
       - "FromBase64String"
       - "Net.WebClient"
       - "Start-Process -WindowStyle Hidden"
+
+  # v4.1 处置安全白名单
+  remediation:
+    # 系统进程保护（绝对不可终止）
+    protected_processes:
+      - "System"
+      - "System Idle Process"
+      - "svchost.exe"
+      - "lsass.exe"
+      - "csrss.exe"
+      - "smss.exe"
+      - "winlogon.exe"
+      - "services.exe"
+      - "wininit.exe"
+      - "dwm.exe"
+      - "explorer.exe"
+      - "csrss.exe"
+      - "spoolsv.exe"
+      - "taskhostw.exe"
+      - "audiodg.exe"
+
+    # 系统文件保护（绝对不可操作）
+    protected_paths:
+      - "C:\\Windows\\System32\\"
+      - "C:\\Windows\\SysWOW64\\"
+      - "C:\\Windows\\Boot\\"
+      - "C:\\Windows\\WinSxS\\"
+      - "C:\\Program Files\\Windows Defender\\"
+      - "C:\\Windows\\System32\\drivers\\"
+
+    # 内网 IP 保护（默认不封禁）
+    protected_networks:
+      - "127.0.0.0/8"
+      - "10.0.0.0/8"
+      - "172.16.0.0/12"
+      - "192.168.0.0/16"
+
+    # 系统关键服务保护（绝对不可禁用）
+    protected_services:
+      - "Dhcp"
+      - "Dnscache"
+      - "eventlog"
+      - "PlugPlay"
+      - "RpcSs"
+      - "Schedule"
+      - "WinDefend"
+      - "wuauserv"
+      - "Winmgmt"
+
+    # 系统关键注册表路径保护
+    protected_registry_paths:
+      - "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control"
+      - "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Services"
+      - "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Windows"
+      - "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon"
+      - "HKEY_LOCAL_MACHINE\\SECURITY"
+      - "HKEY_LOCAL_MACHINE\\SAM"
+
+    # 备份目录
+    backup_dir: "workspace/forensics_backups"
+    # 备份保留天数
+    backup_retention_days: 30

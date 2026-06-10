@@ -42,6 +42,7 @@ try:
         DEFAULT_TEMPERATURE,
         MAX_NEW_TOKENS,
         AGENT_MAX_ITERATIONS,
+        AGENT_RECURSION_LIMIT,
     )
 except ImportError:
     from .config_deepseek import (  # type: ignore
@@ -49,6 +50,7 @@ except ImportError:
         DEFAULT_TEMPERATURE,
         MAX_NEW_TOKENS,
         AGENT_MAX_ITERATIONS,
+        AGENT_RECURSION_LIMIT,
     )
 
 logger = logging.getLogger(__name__)
@@ -173,14 +175,14 @@ async def chat_completions_v2(request: ChatCompletionRequest):
         workspace_dir=workspace_dir,
     ))
 
-    graph = get_graph()
-    config = {"configurable": {"thread_id": thread_id}}
+    graph = await get_graph()
+    config = {"configurable": {"thread_id": thread_id}, "recursion_limit": AGENT_RECURSION_LIMIT}
 
     # ★ v3.0: Session recovery via Checkpointer
     init_state = None
     if request.session_id:
         try:
-            existing = graph.get_state(config)
+            existing = await graph.aget_state(config)
             if existing and existing.values:
                 logger.info("Resuming session %s from checkpoint", thread_id)
         except Exception as e:
@@ -258,8 +260,8 @@ async def chat_completions_v2(request: ChatCompletionRequest):
 
 @router.post("/chat/resume")
 async def resume_chat(request: ResumeRequest):
-    graph = get_graph()
-    config = {"configurable": {"thread_id": request.thread_id}}
+    graph = await get_graph()
+    config = {"configurable": {"thread_id": request.thread_id}, "recursion_limit": AGENT_RECURSION_LIMIT}
 
     async def event_stream():
         try:
@@ -280,7 +282,7 @@ async def resume_chat(request: ResumeRequest):
 
 @router.get("/threads/{thread_id}/history")
 async def get_thread_history(thread_id: str):
-    graph = get_graph()
+    graph = await get_graph()
     config = {"configurable": {"thread_id": thread_id}}
 
     history = []
@@ -299,7 +301,7 @@ async def get_thread_history(thread_id: str):
 
 @router.get("/threads/{thread_id}/state")
 async def get_thread_state(thread_id: str):
-    graph = get_graph()
+    graph = await get_graph()
     config = {"configurable": {"thread_id": thread_id}}
 
     try:
@@ -348,7 +350,7 @@ async def get_audit_logs(days: int = 7, event_type: str = ""):
 @router.get("/agent/health")
 async def agent_health():
     try:
-        graph = get_graph()
+        graph = await get_graph()
         nodes = list(graph.get_graph().nodes) if hasattr(graph, 'get_graph') else []
         return {
             "status": "healthy",

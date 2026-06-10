@@ -20,6 +20,8 @@ export const API_CONFIG = {
   ENDPOINTS: {
     // 聊天
     CHAT_COMPLETIONS: "/chat/completions",
+    // HITL 审批恢复
+    CHAT_RESUME: "/chat/resume",
 
     // 文件管理
     WORKSPACE_FILES: "/workspace/files",
@@ -63,4 +65,5 @@ export const API_URLS = {
 
   // AI服务
   CHAT_COMPLETIONS: buildApiUrl(API_CONFIG.ENDPOINTS.CHAT_COMPLETIONS),
+  CHAT_RESUME: buildApiUrl(API_CONFIG.ENDPOINTS.CHAT_RESUME),
 };

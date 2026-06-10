@@ -144,13 +144,15 @@ def check_startup(
 
     # ---- 3. 自动启动服务（非 Microsoft） ----
     if scope in ("services", "all"):
+        # 使用 Get-Service + WMI 的注册表查询代替 CIM（避免 WMI 卡死）
         ps_svc = (
-            "Get-CimInstance Win32_Service | Where-Object {"
-            "$_.StartMode -eq 'Auto' -and $_.PathName -ne $null -and "
-            "$_.PathName -notlike '*Microsoft*' -and $_.PathName -notlike '*Windows*'"
-            "} | Select-Object Name,DisplayName,PathName,StartName,State | ConvertTo-Json"
+            "Get-Service | Where-Object {"
+            "$_.StartType -eq 'Automatic' -and $_.BinaryPathName -ne $null -and "
+            "$_.BinaryPathName -notlike '*Microsoft*' -and $_.BinaryPathName -notlike '*Windows*'"
+            "} | Select-Object Name,DisplayName,BinaryPathName,StartType,Status | "
+            "ConvertTo-Json -Depth 1"
         )
-        r = run_powershell(ps_svc, timeout=60)
+        r = run_powershell(ps_svc, timeout=15)
         svc_items = []
         if r["success"]:
             svcs = safe_json_parse(r["stdout"])
@@ -158,13 +160,14 @@ def check_startup(
                 svcs = [svcs]
             if isinstance(svcs, list):
                 for s in svcs:
-                    path = s.get("PathName", "")
+                    # Get-Service 字段名不同于 Get-CimInstance
+                    path = s.get("BinaryPathName") or s.get("PathName", "")
                     item = {
                         "name": s.get("Name", ""),
                         "display_name": s.get("DisplayName", ""),
                         "command": path,
-                        "account": s.get("StartName", ""),
-                        "state": s.get("State", ""),
+                        "account": s.get("StartName") or s.get("StartType", ""),
+                        "state": s.get("Status") or s.get("State", ""),
                     }
                     item.update(_check_suspicious_startup(item))
                     svc_items.append(item)

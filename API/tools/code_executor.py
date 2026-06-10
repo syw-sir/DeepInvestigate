@@ -45,10 +45,12 @@ logger = logging.getLogger(__name__)
 MAX_OUTPUT_CHARS = 8000
 
 # 危险调用黑名单（粗粒度静态检查）
+# 原则：禁止 shell 执行（命令注入风险），允许安全的 subprocess.run（列表参数）用于诊断
 DANGEROUS_PATTERNS = [
-    r"\bos\s*\.\s*system\b",
-    r"\bos\s*\.\s*popen\b",
-    r"\bsubprocess\s*\.\s*",
+    r"\bos\s*\.\s*system\b",            # 始终使用 shell — 危险
+    r"\bos\s*\.\s*popen\b",             # 始终使用 shell — 危险
+    r"\bsubprocess\s*\.\s*Popen\b",     # 可控性差 — 危险
+    r"\bsubprocess\s*\.\s*(?:call|check_call|check_output|run)\b.*shell\s*=\s*True",  # shell=True
     r"\bshutil\s*\.\s*rmtree\b",
     r"\b__import__\s*\(\s*['\"]os['\"]\s*\)\s*\.\s*system",
     r"\beval\s*\(",

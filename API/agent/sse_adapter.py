@@ -81,6 +81,8 @@ async def stream_agent_as_openai_sse(
     config = config or {"recursion_limit": 30}
     generated_files: list = []
     final_thread_id = ""
+    _any_token_sent = False  # 跟踪是否有 on_chat_model_stream token 被发送
+    _final_answer = ""  # 从 on_chain_end 捕获 final_answer
 
     if initial_state:
         final_thread_id = initial_state.get("thread_id", "")
@@ -128,6 +130,7 @@ async def stream_agent_as_openai_sse(
                     continue
                 token = getattr(chunk_obj, "content", "") or ""
                 if token:
+                    _any_token_sent = True
                     yield _chunk(model, {"content": token})
 
             elif etype == "on_tool_start":
@@ -145,10 +148,16 @@ async def stream_agent_as_openai_sse(
             elif etype == "on_chain_end" and ename == "LangGraph":
                 output_state = data.get("output") or {}
                 generated_files = output_state.get("generated_files") or []
+                _final_answer = (output_state.get("final_answer") or "").strip()
 
     except Exception as e:
         logger.exception("Agent stream failed")
         yield _chunk(model, {"content": f"\n\n❌ Agent 异常：{type(e).__name__}: {e}"})
+
+    # ── 补偿机制：如果流式过程中没有 token 输出（如 chat_responder 使用非流式调用），
+    #     则在流结束前把 final_answer 整体发送一次，确保前端始终有内容渲染。
+    if not _any_token_sent and _final_answer:
+        yield _chunk(model, {"content": _final_answer})
 
     final_delta: Dict[str, Any] = {"thread_id": final_thread_id}
     if generated_files:

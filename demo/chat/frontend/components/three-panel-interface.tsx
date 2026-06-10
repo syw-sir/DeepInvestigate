@@ -76,6 +76,16 @@ interface Message {
   timestamp: Date;
   attachments?: FileAttachment[];
   localOnly?: boolean;
+  /** HITL 审批中断数据 — 需要展示批准/拒绝按钮 */
+  hitlInterrupt?: {
+    tool_name: string;
+    tool_args: Record<string, unknown>;
+    risk_level: number;
+    message: string;
+    thread_id: string;
+  };
+  /** 审批状态 */
+  hitlStatus?: "pending" | "approved" | "rejected";
 }
 
 interface FileAttachment {
@@ -232,6 +242,7 @@ type ChatMessageItemProps = {
   isStreaming: boolean;
   renderAssistant: (content: string, messageIndex?: number) => React.ReactNode;
   renderAssistantStreaming: (content: string, messageIndex?: number) => React.ReactNode;
+  onHitlResume?: (approved: boolean, messageId: string) => void;
 };
 
 const ChatMessageItem = memo(
@@ -241,7 +252,10 @@ const ChatMessageItem = memo(
     isStreaming,
     renderAssistant,
     renderAssistantStreaming,
+    onHitlResume,
   }: ChatMessageItemProps) {
+    const hitlActive = message.hitlInterrupt && message.hitlStatus === "pending";
+
     return (
       <div className="space-y-2">
         {message.sender === "user" ? (
@@ -275,6 +289,61 @@ const ChatMessageItem = memo(
                   renderAssistant(message.content, messageIndex)
                 )}
               </div>
+              {/* ── HITL 审批卡片 ── */}
+              {hitlActive && (
+                <div className="mt-3 p-4 rounded-lg border-2 border-amber-400 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-600 animate-pulse">
+                  <div className="flex items-start gap-3 mb-3">
+                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-amber-500 flex items-center justify-center">
+                      <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m0 0v2m0-2h2m-2 0H10m9.364-7.364A9 9 0 1112 3a9 9 0 017.364 4.636z" />
+                      </svg>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-semibold text-amber-800 dark:text-amber-300">
+                        操作确认
+                      </div>
+                      <div className="mt-1 text-xs text-amber-700 dark:text-amber-400 space-y-1">
+                        <div>工具：<code className="px-1 py-0.5 rounded bg-amber-100 dark:bg-amber-900/50 text-amber-900 dark:text-amber-200">{message.hitlInterrupt!.tool_name}</code></div>
+                        <div>风险等级：<span className="font-bold">{message.hitlInterrupt!.risk_level}/3</span></div>
+                        <div className="mt-1 text-amber-600 dark:text-amber-300">{message.hitlInterrupt!.message}</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex gap-3 justify-end">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onHitlResume?.(false, message.id);
+                      }}
+                      className="px-4 py-2 rounded-lg bg-red-100 hover:bg-red-200 dark:bg-red-900/40 dark:hover:bg-red-900/60 text-red-700 dark:text-red-300 text-sm font-medium transition-colors"
+                    >
+                      拒绝
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onHitlResume?.(true, message.id);
+                      }}
+                      className="px-4 py-2 rounded-lg bg-green-500 hover:bg-green-600 text-white text-sm font-medium transition-colors shadow-sm"
+                    >
+                      批准
+                    </button>
+                  </div>
+                </div>
+              )}
+              {/* 审批结果标记 */}
+              {message.hitlStatus === "approved" && (
+                <div className="mt-2 text-xs text-green-600 dark:text-green-400 flex items-center gap-1">
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                  已批准
+                </div>
+              )}
+              {message.hitlStatus === "rejected" && (
+                <div className="mt-2 text-xs text-red-600 dark:text-red-400 flex items-center gap-1">
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                  已拒绝
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -287,7 +356,8 @@ const ChatMessageItem = memo(
       prev.messageIndex === next.messageIndex &&
       prev.isStreaming === next.isStreaming &&
       prev.renderAssistant === next.renderAssistant &&
-      prev.renderAssistantStreaming === next.renderAssistantStreaming
+      prev.renderAssistantStreaming === next.renderAssistantStreaming &&
+      prev.onHitlResume === next.onHitlResume
     );
   }
 );
@@ -842,6 +912,9 @@ export function ThreePanelInterface() {
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(
     null
   );
+  // HITL 审批恢复相关
+  const hitlThreadIdRef = useRef<string>("");
+  const [hitlPendingMessageId, setHitlPendingMessageId] = useState<string | null>(null);
   // const [clearChatOpen, setClearChatOpen] = useState(false); // Removed redundant state
 
   // 节流滚动到底部
@@ -2650,6 +2723,126 @@ export function ThreePanelInterface() {
     [autoCollapseEnabled, manualLocks]
   );
 
+  // ==================== HITL 审批恢复 ====================
+  const handleHitlResume = async (approved: boolean, messageId: string) => {
+    // 标记该消息的审批状态
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === messageId
+          ? { ...m, hitlStatus: approved ? "approved" : "rejected" as const, hitlInterrupt: undefined }
+          : m
+      )
+    );
+    setHitlPendingMessageId(null);
+
+    if (!approved) {
+      // 用户拒绝 → 在后端也会拒绝，下发拒绝通知。无需再开流。
+      try {
+        const resumeReq = {
+          thread_id: hitlThreadIdRef.current,
+          approved: false,
+          model: "deepseek-chat",
+        };
+        const res = await fetch(API_URLS.CHAT_RESUME, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(resumeReq),
+        });
+        if (res.ok && res.headers.get("content-type")?.includes("text/event-stream")) {
+          // 消费掉 resume 流（拒绝后的简短拒绝通知）
+          const reader = res.body?.getReader();
+          if (reader) {
+            const decoder = new TextDecoder();
+            let buf = "";
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              buf += decoder.decode(value, { stream: true });
+            }
+          }
+        }
+      } catch (e) {
+        console.warn("HITL reject stream error:", e);
+      }
+      return;
+    }
+
+    // 用户批准 → 调用 /chat/resume，继续流式输出到同一个 AI 消息
+    setIsTyping(true);
+    const resumeReq = {
+      thread_id: hitlThreadIdRef.current,
+      approved: true,
+      model: "deepseek-chat",
+    };
+
+    try {
+      const res = await fetch(API_URLS.CHAT_RESUME, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(resumeReq),
+      });
+      if (!res.ok) throw new Error(`Resume HTTP ${res.status}`);
+
+      const reader = res.body?.getReader();
+      if (!reader) { setIsTyping(false); return; }
+
+      // 清理旧 reader
+      if (streamReaderRef.current) {
+        try { streamReaderRef.current.cancel(); } catch (_) { }
+        streamReaderRef.current = null;
+      }
+      streamReaderRef.current = reader;
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let accumulated = "";
+
+      const flushContent = (text: string) => {
+        accumulated = text;
+        aiPendingContentRef.current = accumulated;
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === messageId ? { ...m, content: accumulated } : m
+          )
+        );
+      };
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed === "data: [DONE]") continue;
+          if (trimmed.startsWith("data: ")) {
+            try {
+              const json = JSON.parse(trimmed.substring(6));
+              const delta = json.choices?.[0]?.delta?.content;
+              if (delta) {
+                accumulated += delta;
+                aiPendingContentRef.current = accumulated;
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === messageId ? { ...m, content: accumulated } : m
+                  )
+                );
+              }
+            } catch (_) { }
+          }
+        }
+      }
+    } catch (e) {
+      console.error("HITL resume error:", e);
+    } finally {
+      setIsTyping(false);
+      streamingMessageIdRef.current = null;
+      setStreamingMessageId(null);
+      streamReaderRef.current = null;
+    }
+  };
+
   const handleSendMessage = async () => {
     if (!inputValue.trim() && attachments.length === 0) return;
     const baseMessageIndex = messages.length;
@@ -2667,6 +2860,8 @@ export function ThreePanelInterface() {
     setInputValue("");
     setAttachments([]);
     setIsTyping(true);
+    // 保存 session_id 供 HITL 恢复时使用
+    hitlThreadIdRef.current = sessionId;
 
     try {
       const response = await fetch(API_URLS.CHAT_COMPLETIONS, {
@@ -2849,6 +3044,61 @@ export function ThreePanelInterface() {
                 accumulatedMessage += deltaContent;
                 // 仅更新 pending，不直接刷新 UI
                 aiPendingContentRef.current = accumulatedMessage;
+
+                // ── HITL 审批中断检测 ──
+                // 后端发送 "⏸️ **需要人工审批**\n```json\n{...}\n```"
+                const hitlMarker = "需要人工审批";
+                const hitlIdx = accumulatedMessage.indexOf(hitlMarker);
+                if (hitlIdx >= 0) {
+                  // 尝试从累积内容中提取 JSON
+                  const jsonMatch = accumulatedMessage.match(/```json\s*([\s\S]*?)```/);
+                  if (jsonMatch) {
+                    try {
+                      const interruptData = JSON.parse(jsonMatch[1]);
+                      // 从内容中移除审批 JSON 块（只保留提示文字），并设置 HITL 状态
+                      const cleanContent = accumulatedMessage.replace(/```json[\s\S]*?```/, "").trim();
+                      // 立即更新消息：去掉冗长 JSON，注入交互提示
+                      const hitlHint = "\n\n> ⚠️ 此操作需要你的确认。请点击下方按钮：";
+                      const displayContent = cleanContent + hitlHint;
+                      accumulatedMessage = displayContent;
+                      aiPendingContentRef.current = displayContent;
+                      flushAiMessage(displayContent);
+                      // 设置中断数据
+                      setMessages((prev) =>
+                        prev.map((m) =>
+                          m.id === aiMsgId
+                            ? {
+                                ...m,
+                                content: displayContent,
+                                hitlInterrupt: {
+                                  tool_name: interruptData.tool_name || "",
+                                  tool_args: interruptData.tool_args || {},
+                                  risk_level: interruptData.risk_level || 3,
+                                  message: interruptData.message || "",
+                                  thread_id: hitlThreadIdRef.current,
+                                },
+                                hitlStatus: "pending" as const,
+                              }
+                            : m
+                        )
+                      );
+                      setHitlPendingMessageId(aiMsgId);
+                      // 标记流已暂停（后端 graph 已 interrupt，等待 resume）
+                      // 不再继续读取本 reader，由 handleHitlResume 接管
+                      if (streamReaderRef.current) {
+                        try { streamReaderRef.current.cancel(); } catch (_) { }
+                        streamReaderRef.current = null;
+                      }
+                      setIsTyping(false);
+                      streamingMessageIdRef.current = null;
+                      setStreamingMessageId(null);
+                      // 跳出循环
+                      return;
+                    } catch (parseErr) {
+                      console.warn("HITL JSON parse error:", parseErr);
+                    }
+                  }
+                }
               }
             }
           } catch (e) {
@@ -3660,6 +3910,7 @@ export function ThreePanelInterface() {
                     }
                     renderAssistant={renderMessageWithSections}
                     renderAssistantStreaming={renderMessageWithSectionsStreaming}
+                    onHitlResume={handleHitlResume}
                   />
                 ))}
                 {/* 加载气泡已移除，改为仅按钮态提示 */}

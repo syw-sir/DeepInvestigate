@@ -167,7 +167,16 @@ REPORTER_SYSTEM = """你是 **DeepInvestigate-Reporter**，一位专业的安全
 2. 短期措施：xxx
 3. 长期建议：xxx
 
-## 9. 附件
+## 9. 处置结果 (v4.1)
+
+| 操作 | 目标 | 结果 | 回滚ID |
+|------|------|------|--------|
+| 终止进程 | PID 2844 update.exe | 成功 | rollback_001 |
+| 隔离文件 | C:\\Temp\\update.exe | 成功 | rollback_002 |
+| 封禁IP | 45.33.32.156 | 成功 | rollback_003 |
+| 删除启动项 | HKCU Run: WindowsUpdate | 成功 | rollback_004 |
+
+## 10. 附件
 - 生成的文件清单（如有）
 ```
 

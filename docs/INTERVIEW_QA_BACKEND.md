@@ -1,4 +1,4 @@
-# DeepInvestigate v3.0 — 后端面试官视角拷打问题集
+# DeepInvestigate v4.1 — 后端面试官视角拷打问题集
 
 > 模拟后端面试官，考察 Python/FastAPI/异步/数据库/系统设计等后端硬技能。
 > 岗位方向：智能体开发 / AI 应用开发 / 大模型应用开发
@@ -82,7 +82,7 @@ async def guarded(t):
 关键点：
 - 挂起不是阻塞，事件循环可以处理其他协程（如心跳、健康检查）
 - 如果所有任务都卡在 `await` 上（如等 API 响应），3 个槽全占但 CPU 空闲，这是正常的
-- 如果任务内部有 CPU 密集操作（如正则匹配大文本），会阻塞事件循环，需要 `run_in_executor` 抛到线程池
+- 如果任务内部有 CPU 密集操作，会阻塞事件循环，需要 `run_in_executor` 抛到线程池
 
 ---
 
@@ -150,7 +150,9 @@ async def guarded(t):
 - `yield value`：将 value 交给调用方的 `async for` 循环，协程挂起
 - 调用方拿到 value 后，下次迭代时协程恢复，继续执行
 
-`_chunk()` 是纯 CPU 操作（json.dumps + 字符串拼接），不需要 IO，同步执行即可。如果 `_chunk()` 内部有数据库查询或网络请求，才需要 `await`。
+`_chunk()` 是纯 CPU 操作（json.dumps + 字符串拼接），不需要 IO，同步执行即可。
+
+v4.1 的 SSE 适配器还加了 `final_answer` 补偿机制——如果流式过程中没有 token 输出（比如 chat_responder 节点用非流式 LLM 调用），则在流结束前从 `on_chain_end` 事件中提取 `final_answer` 整体补发，确保前端始终有内容渲染。
 
 面试官可能追问"如果 json.dumps 的数据很大（比如 100MB 的工具输出），会阻塞事件循环吗？"——会，这时应该用 `await asyncio.to_thread(json.dumps, data)` 抛到线程池。
 
@@ -190,21 +192,24 @@ async def parallel_tool_node(state):
     return {"messages": results}
 ```
 
-当前串行是因为安全调查任务中工具间常有依赖（先查日志再分析），并行意义不大。但如果做多数据源并发查询，并行能显著降低延迟。
+当前串行是因为安全调查任务中工具间常有依赖（先查进程再查网络），并行意义不大。但如果做多数据源并发查询，并行能显著降低延迟。
 
 ---
 
-### 🟡 Q11: `asyncio.gather` 和 `asyncio.wait` 有什么区别？你的 A2A ParallelCoordinator 里用 `gather`，如果某个子任务抛异常会怎样？
+### 🔴 Q11: 你的 v4.0 取证工具调用 PowerShell 是同步还是异步的？为什么用 `subprocess.run` 而不是 `asyncio.create_subprocess_exec`？
 
-> **面试官意图**：考察 asyncio 并发原语的理解。
+> **面试官意图**：考察对 IO 模型的理解和工程权衡。
 
 **回答**：
-- `gather`：按参数顺序返回结果列表；任一任务抛异常，默认立即传播异常，其他任务被取消
-- `wait`：返回 `(done, pending)` 两个集合，可以配置 `FIRST_EXCEPTION` / `FIRST_COMPLETED` / `ALL_COMPLETED`
+当前 `_run_powershell_sync` 使用 `subprocess.run`，这是同步阻塞调用。原因：
 
-我的 `ParallelCoordinator` 用 `gather`，但子任务内部有 try/except，不会抛异常——失败返回 `{"success": False, "result": str(e)}`。所以 `gather` 不会崩。
+1. **LangGraph 的 ToolNode 在线程池中执行同步 tool**——所以即使是同步 subprocess，也不会阻塞事件循环
+2. `subprocess.run` 的超时机制更简单可靠——`timeout=N` 参数直接生效
+3. Windows 上 `asyncio.create_subprocess_exec` 的 ProactorEventLoop 在某些 PowerShell 命令上有兼容性问题
 
-如果子任务可能抛未捕获异常，应该用 `gather(*tasks, return_exceptions=True)`，异常会作为返回值而不是抛出。
+但我保留了 `_run_powershell_async` 函数——用 `loop.run_in_executor` 把同步 subprocess 抛到线程池。这样既保持了代码简洁，又不阻塞事件循环。
+
+如果面试官追问"线程池满了怎么办"——当前默认线程池大小足够（通常 40+），23 个工具的调用频率远达不到上限。如果真的高并发，可以换 `ProcessPoolExecutor` 或异步 subprocess。
 
 ---
 
@@ -257,7 +262,7 @@ async def parallel_tool_node(state):
 **回答**：
 SQLite 默认是**串行写**——同一时间只有一个连接能写入，其他写操作会等锁或返回 `SQLITE_BUSY`。
 
-LangGraph 的 `SqliteSaver` 处理方式：
+LangGraph 的 `AsyncSqliteSaver` 处理方式：
 1. 使用 WAL 模式（Write-Ahead Logging），读写不互斥——读不阻塞写，写不阻塞读
 2. 设置 `timeout` 参数，写锁等待超时后重试而非直接报错
 3. 每个 `thread_id` 独立一行，不同会话的 checkpoint 写入不冲突
@@ -276,16 +281,20 @@ LangGraph 的 `SqliteSaver` 处理方式：
 链路：
 1. FastAPI 接收请求，Pydantic 校验（<1ms）
 2. Input Guard 正则检查（<1ms）
-3. 创建/恢复 Checkpoint（SQLite 读，~5ms）
-4. `retrieve_memory` 节点：Redis 向量检索 + LLM 凝练（~200ms）
-5. `retrieve_knowledge` 节点：ChromaDB 检索（~50ms）
-6. `planner` 节点：LLM 生成计划（~500ms-2s）
-7. `investigator` 节点：第一个 LLM token（~500ms-1s）
+3. 闲聊检测（`_is_chat_question`）→ 如果是问候语直接走 chat_responder 快捷路由
+4. 创建/恢复 Checkpoint（SQLite 读，~5ms）
+5. `retrieve_memory` 节点：Redis 向量检索 + LLM 凝练（~200ms）
+6. `retrieve_knowledge` 节点：ChromaDB 检索（~50ms）
+7. `planner` 节点：LLM 生成计划（~500ms-2s）
+8. `investigator` 节点：第一个 LLM token（~500ms-1s）
+9. 工具调用（取证工具 PowerShell 执行 ~0.3-3s 不等）
 
-**最慢的是 LLM 调用**，占端到端延迟的 80%+。优化方向：
+**最慢的是 LLM 调用**，占端到端延迟的 80%+。其次是非管理员下的取证工具（PowerShell 子进程启动有开销）。
+
+优化方向：
 - 流式输出（已做）：不等完整响应，边生成边推
+- 闲聊快捷路由（已做）：问候语跳过完整流水线
 - 计划缓存：相似问题复用历史计划，跳过 Planner
-- 预热：提前加载 embedding 模型到内存
 
 ---
 
@@ -314,7 +323,7 @@ LangGraph 的 `SqliteSaver` 处理方式：
 
 **回答**：
 绝对不应该提交明文 Key。正确做法：
-1. `.gitignore` 加 `config.yaml`（或至少 `config_deepseek.py`）
+1. `.gitignore` 加 `config.yaml`（或至少敏感部分）
 2. 提供 `config.yaml.example` 模板，Key 字段写 `"YOUR_API_KEY_HERE"`
 3. 生产环境用环境变量：`os.getenv("DEEPSEEK_API_KEY")`
 4. CI/CD 中 Key 从 GitHub Secrets / Vault 注入
@@ -353,13 +362,34 @@ LangGraph 的 checkpoint 是**节点级**的——每执行完一个节点就保
 - 如果 `investigator` 内部有 3 次 LLM 调用，挂了会重做整个 `investigator` 节点（包括已完成的 LLM 调用）
 - 如果 `tool_executor` 有 3 个工具调用，挂了会重做整个 `tool_executor` 节点
 
-这是 LangGraph 的默认行为。如果需要更细粒度的恢复（如 LLM token 级别），需要自定义 checkpointer。
+HITL 审批恢复也依赖这个机制——interrupt 时状态被保存，resume 时从 checkpoint 恢复继续。
+
+---
+
+### 🟡 Q20: 你的 PowerShell 命令里有大括号 `{}`，和 Python `.format()` 的大括号冲突了，你怎么解决的？
+
+> **面试官意图**：考察实际工程踩坑经验。
+
+**回答**：
+这是我实际踩过的一个坑。取证工具的 PowerShell 命令包含 `Where-Object {$_.State -eq 'Running'}` 这样的语法，大括号被 Python 的 `str.format()` 当作格式化占位符，导致 `KeyError` 崩溃。
+
+我的 PS_TEMPLATE 原本是：
+```python
+full_cmd = PS_TEMPLATE.format(cmd=command)  # BUG: {} 被 format 吃掉
+```
+
+改成 `str.replace()`：
+```python
+full_cmd = PS_TEMPLATE.replace("{cmd}", command)  # 只替换 {cmd}，其他 {} 不动
+```
+
+这个 bug 让我意识到：**当拼接两种不同语法的字符串时，永远用最原始的替换方式**，不要用可能解析目标语法的工具。
 
 ---
 
 ## 七、性能与优化
 
-### 🟡 Q20: 你的 RAG 检索每次对话都做，如果用户连续问 5 个相关问题，每次都重新 embedding + 检索，怎么优化？
+### 🟡 Q21: 你的 RAG 检索每次对话都做，如果用户连续问 5 个相关问题，每次都重新 embedding + 检索，怎么优化？
 
 > **面试官意图**：考察缓存和性能优化思维。
 
@@ -374,7 +404,7 @@ LangGraph 的 checkpoint 是**节点级**的——每执行完一个节点就保
 
 ---
 
-### 🔴 Q21: 你的 `messages` 列表会随着对话越来越长，LLM 的 context window 有限，你怎么处理？
+### 🔴 Q22: 你的 `messages` 列表会随着对话越来越长，LLM 的 context window 有限，你怎么处理？
 
 > **面试官意图**：考察对 LLM 上下文管理的理解。
 
@@ -387,7 +417,7 @@ LangGraph 的 checkpoint 是**节点级**的——每执行完一个节点就保
 更完善的策略：
 1. **滑动窗口**：只保留最近 N 轮对话 + 系统消息
 2. **摘要压缩**：当 messages 超过阈值，用 LLM 将历史对话压缩为摘要
-3. **工具输出截断**：工具返回结果超过 2000 字符就截断 + 标注省略量
+3. **工具输出截断**：工具返回结果超过 2000 字符就截断 + 标注省略量（已实现）
 4. **记忆外置**：重要信息存长期记忆，不占 context window
 
 当前项目对话不会特别长（单次调查任务 5-10 轮），DeepSeek 的 64K context 完全够用。但面试中要能说出扩展方案。
@@ -396,7 +426,7 @@ LangGraph 的 checkpoint 是**节点级**的——每执行完一个节点就保
 
 ## 八、测试与质量
 
-### 🟢 Q22: 你的项目里有单元测试吗？怎么测试一个 LangGraph 节点？
+### 🟢 Q23: 你的项目里有单元测试吗？怎么测试一个 LangGraph 节点？
 
 > **面试官意图**：考察测试意识。
 
@@ -424,7 +454,7 @@ LangGraph 节点的测试要点：
 
 ---
 
-### 🟡 Q23: 你的评估脚本 `run_eval.py` 里 `asyncio.wait_for(run_one(task), timeout=300)`，如果超时了，Agent 内部正在执行的工具调用会怎样？
+### 🟡 Q24: 你的评估脚本 `run_eval.py` 里 `asyncio.wait_for(run_one(task), timeout=300)`，如果超时了，Agent 内部正在执行的工具调用会怎样？
 
 > **面试官意图**：考察对超时和资源清理的理解。
 
@@ -432,19 +462,19 @@ LangGraph 节点的测试要点：
 `asyncio.wait_for` 超时后会向协程注入 `asyncio.CancelledError`。但这里有个问题：
 
 - 如果 Agent 正在 `await` LLM API 调用，`CancelledError` 会中断等待，协程被取消
-- 但如果 Agent 正在执行同步的 `subprocess.run`（代码沙箱），`CancelledError` 无法中断同步操作——子进程会继续运行直到自己结束
+- 但如果 Agent 正在执行同步的 PowerShell 子进程（取证工具），`CancelledError` 无法中断同步操作——子进程会继续运行直到自己结束
 
 这是 Python asyncio 的经典陷阱：**同步阻塞操作无法被异步取消**。
 
 解决方案：
-- 代码沙箱用 `asyncio.create_subprocess_exec` 替代 `subprocess.run`，可以被取消
-- 或设置子进程级别的超时（`subprocess.run(timeout=...)`）
+- 取证工具用 `asyncio.create_subprocess_exec` 替代 `subprocess.run`，可以被取消
+- 或设置子进程级别的超时（`subprocess.run(timeout=...)`，已实现）
 
 ---
 
 ## 九、压力测试
 
-### ⚫ Q24: 你的项目里 `try/except ImportError` 到处都是，这是好的设计还是代码坏味道？
+### ⚫ Q25: 你的项目里 `try/except ImportError` 到处都是，这是好的设计还是代码坏味道？
 
 > **面试官意图**：考察对代码质量的判断力。
 
@@ -464,7 +494,7 @@ LangGraph 节点的测试要点：
 
 ---
 
-### ⚫ Q25: 你的 `config_deepseek.py` 里 `_get` 函数自己实现了一套 YAML 配置读取，为什么不用 Pydantic Settings？
+### ⚫ Q26: 你的 `config_deepseek.py` 里 `_get` 函数自己实现了一套 YAML 配置读取，为什么不用 Pydantic Settings？
 
 > **面试官意图**：考察对 Python 配置管理最佳实践的了解。
 
@@ -491,7 +521,7 @@ class Settings(BaseSettings):
 
 ---
 
-### ⚫ Q26: 给你 30 秒，说出你项目中最大的三个技术债务。
+### ⚫ Q27: 给你 30 秒，说出你项目中最大的三个技术债务。
 
 > **面试官意图**：考察自我认知和工程成熟度。
 
@@ -513,7 +543,7 @@ class Settings(BaseSettings):
 | 异步与并发 | Q9, Q10, Q11 |
 | 数据库与存储 | Q12, Q13, Q14 |
 | 系统设计 | Q15, Q16, Q17 |
-| 错误处理与调试 | Q18, Q19 |
-| 性能与优化 | Q20, Q21 |
-| 测试与质量 | Q22, Q23 |
-| 代码质量与工程规范 | Q24, Q25, Q26 |
+| 错误处理与调试 | Q18, Q19, Q20 |
+| 性能与优化 | Q21, Q22 |
+| 测试与质量 | Q23, Q24 |
+| 代码质量与工程规范 | Q25, Q26, Q27 |

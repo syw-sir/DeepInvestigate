@@ -29,7 +29,7 @@ async def run_agent_sync(
     max_iterations: int = 15,
 ) -> dict:
     """非流式：跑完整个 Agent，返回最终 state（包含 final_answer / generated_files）"""
-    graph = get_graph()
+    graph = await get_graph()
     init = new_initial_state(
         user_query=user_query,
         thread_id=thread_id,
@@ -37,7 +37,7 @@ async def run_agent_sync(
         workspace_dir=workspace_dir,
         max_iterations=max_iterations,
     )
-    final_state = await graph.ainvoke(init, config={"recursion_limit": 25})
+    final_state = await graph.ainvoke(init, config={"configurable": {"thread_id": thread_id}, "recursion_limit": 25})
     return final_state
 
 

@@ -49,7 +49,7 @@ def setup_ctx() -> str:
 
 async def test_graph_structure():
     print("\n[1] Graph structure check")
-    g = get_graph()
+    g = await get_graph()
     nodes = list(g.get_graph().nodes)
     print(f"  Nodes: {nodes}")
     expected = {"retrieve_memory", "retrieve_knowledge", "planner",
@@ -86,7 +86,7 @@ async def test_streaming(workspace: str):
         workspace_dir=workspace,
         max_iterations=5,
     )
-    g = get_graph()
+    g = await get_graph()
     n_chunks = 0
     async for chunk in stream_agent_as_openai_sse(g, init, model="deepseek-chat"):
         n_chunks += 1

@@ -34,6 +34,14 @@ from .forensics.startup_checker import check_startup
 from .forensics.registry_scanner import scan_registry
 from .forensics.file_integrity import check_file_integrity
 
+# v4.1 处置工具
+from .forensics.remediation.kill_process import kill_process
+from .forensics.remediation.quarantine_file import quarantine_file
+from .forensics.remediation.block_ip import block_ip
+from .forensics.remediation.remove_startup import remove_startup
+from .forensics.remediation.repair_registry import repair_registry
+from .forensics.remediation.rollback import rollback_action
+
 
 # ----- 全量工具清单（顺序即是给 LLM 看到的顺序） -----
 _ALL_TOOLS: List[BaseTool] = [
@@ -55,6 +63,13 @@ _ALL_TOOLS: List[BaseTool] = [
     check_startup,
     scan_registry,
     check_file_integrity,
+    # v4.1 处置工具
+    kill_process,
+    quarantine_file,
+    block_ip,
+    remove_startup,
+    repair_registry,
+    rollback_action,
 ]
 
 

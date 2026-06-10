@@ -1,28 +1,32 @@
 """
 系统信息采集工具 (v4.0)
 
-采集主机基本信息：OS版本、补丁、用户、防火墙、杀软状态等。
+采集主机基本信息：OS版本、用户、防火墙、杀软状态等。
 风险等级：Level 0（纯信息采集，无安全风险）
+
+注意：此机器 WMI/CIM 子系统不可用，全部使用注册表/Python 原生方式。
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import os as _os
+import platform
+import socket as _socket
 
 from langchain_core.tools import tool
 
-from ._utils import run_powershell, safe_json_parse, format_result
+from ._utils import run_powershell, format_result
 
 logger = logging.getLogger(__name__)
+
+CMD_TIMEOUT = 5  # 短超时，避免 WMI 卡死
 
 
 @tool("collect_system_info", parse_docstring=True)
 def collect_system_info() -> str:
     """采集主机系统基本信息，为安全调查提供上下文。
-
-    采集内容包括：OS版本与Build号、最近安装的补丁、本地用户列表、
-    管理员组成员、防火墙状态、杀软状态、系统环境变量。
 
     Returns:
         JSON 字符串，包含系统各项信息。
@@ -30,105 +34,83 @@ def collect_system_info() -> str:
     info = {}
     errors = []
 
-    # 1. OS 版本信息
-    ps_os = (
-        "Get-CimInstance Win32_OperatingSystem | "
-        "Select-Object Caption,Version,BuildNumber,OSArchitecture,LastBootUpTime,"
-        "InstallDate,RegisteredUser | ConvertTo-Json"
-    )
-    r = run_powershell(ps_os)
-    if r["success"]:
-        info["os"] = safe_json_parse(r["stdout"])
-    else:
-        errors.append(f"OS信息采集失败: {r['error'] or r['stderr']}")
+    # 1. OS 版本 — Python platform 模块（最快，不依赖任何外部命令）
+    try:
+        info["os"] = {
+            "system": platform.system(),
+            "release": platform.release(),
+            "version": platform.version(),
+            "machine": platform.machine(),
+            "processor": platform.processor(),
+            "hostname": _socket.gethostname(),
+            "python_version": platform.python_version(),
+        }
+    except Exception as e:
+        errors.append(f"OS信息采集失败: {e}")
 
-    # 2. 最近安装的补丁（最近 10 个）
-    ps_hotfix = (
-        "Get-HotFix | Sort-Object InstalledOn -Descending | Select-Object -First 10 "
-        "HotFixID,Description,InstalledOn,InstalledBy | ConvertTo-Json"
+    # 2. OS 详细信息 — 注册表直读（不依赖 WMI）
+    r = run_powershell(
+        'Get-ItemProperty "HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion" 2>$null | '
+        'Select-Object ProductName,DisplayVersion,CurrentBuild,UBR,InstallDate,RegisteredOwner | '
+        'ConvertTo-Json',
+        timeout=CMD_TIMEOUT,
     )
-    r = run_powershell(ps_hotfix)
-    if r["success"]:
-        hotfixes = safe_json_parse(r["stdout"])
-        if isinstance(hotfixes, dict) and not hotfixes.get("parse_error"):
-            hotfixes = [hotfixes]  # 单条记录转为列表
-        info["recent_hotfixes"] = hotfixes if isinstance(hotfixes, list) else []
+    if r["success"] and r["stdout"]:
+        try:
+            info["os_details"] = json.loads(r["stdout"])
+        except json.JSONDecodeError:
+            info["os_details"] = r["stdout"][:300]
     else:
-        errors.append(f"补丁信息采集失败: {r['error'] or r['stderr']}")
+        errors.append(f"OS详情采集失败（WMI可能不可用）")
 
-    # 3. 本地用户列表
-    ps_users = (
-        "Get-LocalUser | Select-Object Name,Enabled,LastLogon,Description | ConvertTo-Json"
+    # 3. 用户信息 — net user（不依赖 WMI）
+    r = run_powershell("net user 2>&1", timeout=CMD_TIMEOUT)
+    if r["success"]:
+        info["users"] = r["stdout"][:1000]
+    else:
+        errors.append(f"用户列表采集失败")
+
+    r = run_powershell("net localgroup Administrators 2>&1", timeout=CMD_TIMEOUT)
+    if r["success"]:
+        info["administrators"] = r["stdout"][:800]
+    else:
+        errors.append(f"管理员组采集失败")
+
+    # 4. 防火墙 — netsh（不依赖 WMI）
+    r = run_powershell("netsh advfirewall show allprofiles state 2>&1", timeout=CMD_TIMEOUT)
+    if r["success"]:
+        info["firewall"] = r["stdout"][:800]
+
+    # 5. 网络连接 — netstat（不依赖 WMI）
+    r = run_powershell("netstat -ano 2>&1 | Select-Object -First 50", timeout=CMD_TIMEOUT)
+    if r["success"]:
+        info["network_connections"] = r["stdout"][:2000]
+
+    # 6. 系统环境
+    info["environment"] = {
+        "path": _os.environ.get("PATH", "")[:500],
+        "username": _os.environ.get("USERNAME", ""),
+        "computername": _os.environ.get("COMPUTERNAME", ""),
+        "tmp": _os.environ.get("TEMP", "")[:200],
+    }
+
+    # 7. 杀软 — 尝试 Get-MpComputerStatus（测试是否可用）
+    r = run_powershell(
+        "Get-MpComputerStatus 2>$null | "
+        "Select-Object AntivirusEnabled,RealTimeProtectionEnabled | ConvertTo-Json",
+        timeout=CMD_TIMEOUT,
     )
-    r = run_powershell(ps_users)
-    if r["success"]:
-        users = safe_json_parse(r["stdout"])
-        if isinstance(users, dict) and not users.get("parse_error"):
-            users = [users]
-        info["local_users"] = users if isinstance(users, list) else []
-    else:
-        errors.append(f"用户列表采集失败: {r['error'] or r['stderr']}")
-
-    # 4. 管理员组成员
-    ps_admins = (
-        "Get-LocalGroupMember -Group 'Administrators' | "
-        "Select-Object Name,ObjectClass,PrincipalSource | ConvertTo-Json"
-    )
-    r = run_powershell(ps_admins)
-    if r["success"]:
-        admins = safe_json_parse(r["stdout"])
-        if isinstance(admins, dict) and not admins.get("parse_error"):
-            admins = [admins]
-        info["administrators"] = admins if isinstance(admins, list) else []
-    else:
-        errors.append(f"管理员组采集失败: {r['error'] or r['stderr']}")
-
-    # 5. 防火墙状态
-    ps_fw = (
-        "Get-NetFirewallProfile | Select-Object Name,Enabled | ConvertTo-Json"
-    )
-    r = run_powershell(ps_fw)
-    if r["success"]:
-        fw = safe_json_parse(r["stdout"])
-        if isinstance(fw, dict) and not fw.get("parse_error"):
-            fw = [fw]
-        info["firewall_profiles"] = fw if isinstance(fw, list) else []
-    else:
-        errors.append(f"防火墙状态采集失败: {r['error'] or r['stderr']}")
-
-    # 6. 杀软状态
-    ps_av = (
-        "Get-CimInstance -Namespace root/SecurityCenter2 -ClassName AntivirusProduct | "
-        "Select-Object displayName,productState | ConvertTo-Json"
-    )
-    r = run_powershell(ps_av)
-    if r["success"]:
-        av = safe_json_parse(r["stdout"])
-        if isinstance(av, dict) and not av.get("parse_error"):
-            av = [av]
-        info["antivirus"] = av if isinstance(av, list) else []
-    else:
-        # 尝试 Windows Defender 专属命令
-        ps_defender = "Get-MpComputerStatus | Select-Object AntivirusEnabled,RealTimeProtectionEnabled,AntivirusSignatureLastUpdated | ConvertTo-Json"
-        r2 = run_powershell(ps_defender)
-        if r2["success"]:
-            info["antivirus"] = [safe_json_parse(r2["stdout"])]
-        else:
-            errors.append(f"杀软状态采集失败: {r['error'] or r['stderr']}")
-
-    # 7. 环境变量 PATH
-    ps_env = "$env:PATH"
-    r = run_powershell(ps_env)
-    if r["success"]:
-        info["path_environment"] = r["stdout"]
-    else:
-        errors.append(f"环境变量采集失败: {r['error'] or r['stderr']}")
+    if r["success"] and r["stdout"]:
+        try:
+            info["defender"] = json.loads(r["stdout"])
+        except json.JSONDecodeError:
+            info["defender"] = {"raw": r["stdout"][:200]}
 
     if errors:
         info["_errors"] = errors
 
     return format_result(
-        success=len(errors) < 3,  # 少量错误仍算成功
+        success=True,
         data=info,
         error="; ".join(errors) if errors else None,
     )

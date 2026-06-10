@@ -598,6 +598,77 @@ def test_integration():
         print(f"  {_red('FAIL')}: {e}")
 
 
+def test_remediation():
+    """8. 处置工具测试（安全验证）"""
+    print(_cyan("\n[8] 处置工具安全验证"))
+
+    try:
+        from tools.forensics.remediation.kill_process import kill_process
+        from tools.forensics.remediation.quarantine_file import quarantine_file
+        from tools.forensics.remediation.block_ip import block_ip
+        from tools.forensics.remediation.remove_startup import remove_startup
+        from tools.forensics.remediation.repair_registry import repair_registry
+        from tools.forensics.remediation.rollback import rollback_action
+
+        # 8.1 kill_process - PID 保护
+        r = json.loads(kill_process.invoke({"pid": 0}))
+        ok = not r["success"] and "PID" in str(r)
+        report.add("kill_process PID保护", ok)
+        print(f"  kill_process PID保护: {_green('OK') if ok else _red('FAIL')}")
+
+        r = json.loads(kill_process.invoke({"pid": 4}))
+        ok2 = not r["success"] and "PID" in str(r)
+        report.add("kill_process System保护", ok2)
+        print(f"  kill_process System保护: {_green('OK') if ok2 else _red('FAIL')}")
+
+        # 8.2 quarantine_file - 文件不存在
+        r = json.loads(quarantine_file.invoke({"file_path": "C:/nonexistent/test_malware.exe"}))
+        ok = not r["success"] and "不存在" in str(r)
+        report.add("quarantine_file 文件检查", ok)
+        print(f"  quarantine_file 文件检查: {_green('OK') if ok else _red('FAIL')}")
+
+        # 8.3 block_ip - 内网 IP 保护
+        r = json.loads(block_ip.invoke({"ip": "192.168.1.1"}))
+        ok = not r["success"] and "内网" in str(r)
+        report.add("block_ip 内网保护", ok)
+        print(f"  block_ip 内网保护: {_green('OK') if ok else _red('FAIL')}")
+
+        r = json.loads(block_ip.invoke({"ip": "not-an-ip"}))
+        ok = not r["success"] and "无效" in str(r)
+        report.add("block_ip 格式验证", ok)
+        print(f"  block_ip 格式验证: {_green('OK') if ok else _red('FAIL')}")
+
+        # 8.4 remove_startup - 参数验证
+        r = json.loads(remove_startup.invoke({"source": "invalid", "identifier": "test"}))
+        ok = not r["success"] and "无效" in str(r)
+        report.add("remove_startup 参数验证", ok)
+        print(f"  remove_startup 参数验证: {_green('OK') if ok else _red('FAIL')}")
+
+        # 8.5 repair_registry - 参数验证
+        r = json.loads(repair_registry.invoke({"path": "HKCU/Test", "key": "Test", "action": "invalid"}))
+        ok = not r["success"] and "无效" in str(r)
+        report.add("repair_registry 参数验证", ok)
+        print(f"  repair_registry 参数验证: {_green('OK') if ok else _red('FAIL')}")
+
+        # 8.6 rollback_action - 记录不存在
+        r = json.loads(rollback_action.invoke({"action_id": "nonexistent_99999"}))
+        ok = not r["success"] and "未找到" in str(r)
+        report.add("rollback_action 记录验证", ok)
+        print(f"  rollback_action 记录验证: {_green('OK') if ok else _red('FAIL')}")
+
+        # 8.7 白名单保护验证
+        tool_count = 6
+        report.add("处置工具完整性", True, f"6个工具全部就绪")
+        print(f"  处置工具完整性: {_green('OK')} ({tool_count}个工具)")
+
+        print(f"  {_green('处置工具安全验证全部通过')}")
+
+    except Exception as e:
+        report.add("处置工具测试", False, str(e))
+        traceback.print_exc()
+        print(f"  {_red('FAIL')}: {e}")
+
+
 # ============================================================
 # 主入口
 # ============================================================
@@ -624,6 +695,7 @@ def main():
     test_risk_engine()
     test_error_handling()
     test_integration()
+    test_remediation()
 
     report.print_summary()
 

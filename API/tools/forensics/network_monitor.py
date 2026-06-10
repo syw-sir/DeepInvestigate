@@ -58,6 +58,92 @@ def _check_suspicious_connection(conn: dict) -> dict:
     }
 
 
+def _parse_netstat(text: str, pid_name_map: dict = None) -> list:
+    """解析 netstat -ano 输出为连接列表（非管理员回退路径）"""
+    connections = []
+    import re as _re
+
+    if pid_name_map is None:
+        pid_name_map = {}
+
+    state_map = {
+        "LISTENING": "listen", "ESTABLISHED": "established",
+        "TIME_WAIT": "time_wait", "CLOSE_WAIT": "close_wait",
+        "SYN_SENT": "syn_sent", "SYN_RECEIVED": "syn_received",
+        "FIN_WAIT_1": "fin_wait1", "FIN_WAIT_2": "fin_wait2",
+        "LAST_ACK": "last_ack", "CLOSING": "closing",
+    }
+
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("活动连接") or line.startswith("Active") or line.startswith("Proto"):
+            continue
+
+        parts = line.split()
+        if len(parts) < 5:
+            continue
+
+        protocol = parts[0].lower()
+        local = parts[1]
+        remote = parts[2]
+        state_str = parts[3] if len(parts) == 5 else ""
+        pid_str = parts[-1]
+
+        if not pid_str.isdigit():
+            continue
+
+        pid = int(pid_str)
+        # 解析本地/远程地址:端口
+        local_addr, local_port = "0.0.0.0", 0
+        if ":" in local:
+            # netstat 格式: [::1]:port 或 192.168.1.1:port
+            if local.startswith("["):
+                local_addr = local[1:local.index("]")]
+                local_port = int(local.split("]:")[-1])
+            else:
+                addr_part, _, port_part = local.rpartition(":")
+                local_addr = addr_part
+                try:
+                    local_port = int(port_part)
+                except ValueError:
+                    local_port = 0
+
+        remote_addr, remote_port = "0.0.0.0", 0
+        if ":" in remote and remote != "*:*":
+            if remote.startswith("["):
+                remote_addr = remote[1:remote.index("]")]
+                remote_port = int(remote.split("]:")[-1])
+            else:
+                addr_part, _, port_part = remote.rpartition(":")
+                remote_addr = addr_part
+                try:
+                    remote_port = int(port_part)
+                except ValueError:
+                    remote_port = 0
+
+        state_mapped = state_map.get(state_str.upper(), state_str.lower())
+
+        process_name = pid_name_map.get(pid, f"PID_{pid}")
+
+        conn = {
+            "protocol": protocol,
+            "local_address": local_addr,
+            "local_port": local_port,
+            "remote_address": remote_addr,
+            "remote_port": remote_port,
+            "state": state_mapped,
+            "pid": pid,
+            "process_name": process_name,
+            "created": "",
+        }
+
+        suspicion = _check_suspicious_connection(conn)
+        conn.update(suspicion)
+        connections.append(conn)
+
+    return connections
+
+
 @tool("check_network", parse_docstring=True)
 def check_network(
     filter_port: Optional[int] = None,
@@ -72,73 +158,42 @@ def check_network(
     Returns:
         JSON 字符串，包含网络连接列表和可疑分析。
     """
-    # 使用 Get-NetTCPConnection 获取 TCP 连接
-    ps_tcp = (
-        "Get-NetTCPConnection | "
-        "Select-Object LocalAddress,LocalPort,RemoteAddress,RemotePort,State,"
-        "OwningProcess,@{Name='CreationTime';Expression={(Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue).StartTime}} | "
-        "ConvertTo-Json -Depth 2"
-    )
-
-    r = run_powershell(ps_tcp, timeout=60)
-    if not r["success"]:
-        return format_result(False, error=r["error"] or r["stderr"])
-
-    raw_connections = safe_json_parse(r["stdout"])
-    if isinstance(raw_connections, dict) and not raw_connections.get("parse_error"):
-        raw_connections = [raw_connections]
-    if not isinstance(raw_connections, list):
-        return format_result(False, error="网络连接数据解析失败")
-
     connections = []
-    for conn in raw_connections:
-        remote_port = conn.get("RemotePort", 0)
-        state = conn.get("State", 0)
 
-        if filter_port is not None and remote_port != filter_port:
-            continue
+    # 预构建 PID→进程名映射（一次性 Get-Process，避免逐连接查询）
+    # 注意：tasklist 在本机可能卡死，使用 Get-Process 代替
+    pid_name_map = {}
+    try:
+        ps_map_cmd = (
+            "Get-Process | Select-Object Id,ProcessName | ConvertTo-Json -Depth 1"
+        )
+        map_r = run_powershell(ps_map_cmd, timeout=15)
+        if map_r["success"] and map_r["stdout"]:
+            procs = safe_json_parse(map_r["stdout"])
+            if isinstance(procs, dict) and not procs.get("parse_error"):
+                procs = [procs]
+            if isinstance(procs, list):
+                for p in procs:
+                    pid = p.get("Id")
+                    name = p.get("ProcessName", "")
+                    if pid and name:
+                        pid_name_map[int(pid)] = name
+    except Exception:
+        pass
 
-        if established_only and state != 5:  # 5 = Established
-            continue
+    # ── 主路径：netstat -ano（无需管理员权限，始终可用） ──
+    ns_cmd = "netstat -ano"
+    ns_r = run_powershell(ns_cmd, timeout=30)
+    if ns_r["success"] and ns_r["stdout"]:
+        connections = _parse_netstat(ns_r["stdout"], pid_name_map)
+        # 应用过滤器
+        if filter_port is not None:
+            connections = [c for c in connections if c.get("remote_port") == filter_port]
+        if established_only:
+            connections = [c for c in connections if c.get("state") == "established"]
 
-        # 获取进程名
-        pid = conn.get("OwningProcess")
-        process_name = ""
-        if pid:
-            ps_pname = (
-                f"Get-Process -Id {pid} -ErrorAction SilentlyContinue | "
-                "Select-Object -ExpandProperty ProcessName"
-            )
-            pr = run_powershell(ps_pname, timeout=10)
-            if pr["success"] and pr["stdout"]:
-                process_name = pr["stdout"].strip()
-
-        # 状态映射
-        state_map = {
-            1: "closed", 2: "listen", 3: "syn_sent", 4: "syn_received",
-            5: "established", 6: "fin_wait1", 7: "fin_wait2",
-            8: "close_wait", 9: "closing", 10: "last_ack",
-            11: "time_wait", 12: "delete_tcb",
-        }
-        state_str = state_map.get(state, f"unknown({state})")
-
-        enhanced = {
-            "protocol": "tcp",
-            "local_address": conn.get("LocalAddress", ""),
-            "local_port": conn.get("LocalPort", 0),
-            "remote_address": conn.get("RemoteAddress", ""),
-            "remote_port": remote_port,
-            "state": state_str,
-            "pid": pid,
-            "process_name": process_name,
-            "created": str(conn.get("CreationTime") or ""),
-        }
-
-        # 可疑分析
-        suspicion = _check_suspicious_connection(enhanced)
-        enhanced.update(suspicion)
-
-        connections.append(enhanced)
+    if not connections:
+        return format_result(False, error="网络连接查询失败（netstat 无数据）")
 
     # 统计
     total = len(connections)
